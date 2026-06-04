@@ -4,7 +4,7 @@ R code for analyzing predictors of adolescent financial literacy across the Unit
 
 **Overview**
 
-This analysis examines stability and change in predictors of adolescent financial literacy, comparing pre- and post-pandemic patterns across three countries. Based on MS thesis work at Purdue University (December 2025).
+This project analyzes which family, school, and socioeconomic factors predict financial literacy among 15-year-olds across three countries, comparing pre- and post-pandemic patterns. Based on MS thesis work at Purdue University (December 2025).
 
 
 **Methods**
