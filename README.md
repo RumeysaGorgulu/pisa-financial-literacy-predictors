@@ -6,13 +6,16 @@ R code for analyzing predictors of adolescent financial literacy across the Unit
 
 This analysis examines stability and change in predictors of adolescent financial literacy, comparing pre- and post-pandemic patterns across three countries. Based on MS thesis work at Purdue University (December 2025).
 
+
 **Methods**
+
 - Multiple regression with 10 plausible values combined via Rubin's rules
 - Fay's BRR replicate weights (80 replicates)
 - Multiple imputation for missing predictors (m = 10) using `mice`
 - Country-stratified analysis (USA, Poland, Spain)
 
 **Data**
+
 PISA 2018 and 2022 financial literacy datasets are publicly available from OECD:
 https://www.oecd.org/pisa/data/
 
@@ -23,6 +26,7 @@ Required files (place in `data/` folder):
 - `CY08MSP\_FLT\_QQQ.SAV` (PISA 2022)
 
 **Usage**
+
 1. Download the two `.SAV` files from OECD and place them in a `data/` folder.
 
 2. Open `R/analysis.R` in RStudio.
