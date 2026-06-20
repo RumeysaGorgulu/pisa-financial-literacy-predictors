@@ -39,7 +39,7 @@ Required files (place in `data/` folder):
 
 If you use this code, please cite:
 
-Gorgulu, R. (2025). \*Money Matters: How Predictors of Adolescent Financial Literacy Have Changed Over Time Across Countries\* \[Master's thesis, Purdue University].
+Gorgulu, R. (2025). \Money Matters: How Predictors of Adolescent Financial Literacy Have Changed Over Time Across Countries\ \[Master's thesis, Purdue University].
 
 **License**
 MIT License — see `LICENSE` file.
