@@ -1,46 +1,67 @@
-**PISA Financial Literacy Predictors (2018–2022)**
+# Predictors of Adolescent Financial Literacy: PISA 2018 vs. 2022
 
-R code for analyzing predictors of adolescent financial literacy across the United States, Poland, and Spain using PISA 2018 and 2022 cycles.
+R code for analyzing which student, family and school factors predict 15-year-olds' financial literacy in the **United States, Poland and Spain**, and whether those relations changed between the pre-pandemic (2018) and post-pandemic (2022) PISA cycles.
 
-**Overview**
+Based on my M.S. thesis at Purdue University (December 2025).
 
-This project analyzes which family, school, and socioeconomic factors predict financial literacy among 15-year-olds across three countries, comparing pre- and post-pandemic patterns. Based on MS thesis work at Purdue University (December 2025).
+## Key findings
 
+- **Consistent positive predictors** in almost every country and cycle:
+  - Familiarity with financial concepts
+  - Confidence with digital financial tools
+  - Home possessions
+  - School socioeconomic composition
+- **School-based financial education was negatively associated** with financial literacy in every model. Exposure alone is a weak indicator of effective financial socialization.
+- General financial confidence and family financial involvement were negatively associated in several models.
+- **Few predictors changed between 2018 and 2022.** The clearest shift is the growing association of school socioeconomic composition in Poland.
+- Models explain about 25–27% of the variance in financial literacy.
 
-**Methods**
+This repository fits a separate model for each country and cycle. The formal tests of change between cycles (pooled models with cycle × predictor interactions) are reported in the accompanying manuscript.
 
-- Multiple regression with 10 plausible values combined via Rubin's rules
-- Fay's BRR replicate weights (80 replicates)
-- Multiple imputation for missing predictors (m = 10) using `mice`
-- Country-stratified analysis (USA, Poland, Spain)
+![Coefficients by country and cycle](plots/coefficients_by_country.png)
 
-**Data**
+<!-- After running R/analysis.R, paste the "Variance explained" table from output/results_table.md here. -->
 
-PISA 2018 and 2022 financial literacy datasets are publicly available from OECD:
-https://www.oecd.org/pisa/data/
+## Methods
 
-Required files (place in `data/` folder):
+| Challenge | How it is handled |
+|---|---|
+| Outcome measured with error | 10 plausible values; one model per PV, pooled with **Rubin's rules** (`mitools::MIcombine`) |
+| Complex survey sample | Final student weights plus **Fay's BRR** variance estimation with 80 replicate weights (ρ = 0.5) (`survey::svrepdesign`) |
+| Missing predictors | **Multiple imputation** with `mice` (m = 10; PMM for continuous predictors, logistic or polytomous regression for categorical ones); imputation *k* is paired with PV *k* |
+| Changed coding across cycles | 2022 parental education (ISCED 2011) harmonized to the 2018 scale |
+| School context | School socioeconomic composition = weighted school mean of student ESCS |
+| Model assumptions | Residual plots, VIF and Breusch–Pagan test per country × cycle (`output/diagnostics.csv`) |
 
-- `CY07\_MSU\_FLT\_QQQ.SAV` (PISA 2018)
+An option `IMPUTE_WITH_OUTCOME` (default `FALSE`, as in the thesis) runs a sensitivity analysis in which the outcome is included in the imputation model.
 
-- `CY08MSP\_FLT\_QQQ.SAV` (PISA 2022)
+## Repository structure
 
-**Usage**
+```
+R/analysis.R      full pipeline: import → cleaning → descriptives → imputation → models → tables/plots
+data/             PISA .SAV files go here (not tracked)
+output/           CSV results and results_table.md (created by the script)
+plots/            coefficient plot and diagnostic plots (created by the script)
+```
 
-1. Download the two `.SAV` files from OECD and place them in a `data/` folder.
+## Reproducing
 
-2. Open `R/analysis.R` in RStudio.
+1. Download the PISA 2018 and 2022 financial literacy student files (SPSS) from https://www.oecd.org/pisa/data/ and place them in `data/`:
+   - `CY07_MSU_FLT_QQQ.SAV` (2018)
+   - `CY08MSP_FLT_QQQ.SAV` (2022)
+2. Install the packages:
+   ```r
+   install.packages(c("tidyverse", "haven", "mice", "survey", "mitools", "car", "lmtest"))
+   ```
+3. From the repository root, run:
+   ```
+   Rscript R/analysis.R
+   ```
 
-3. Run once: uncomment and run the `install.packages()` line at the top.
+## Citation
 
-4. Run the full script.
+Gorgulu, R. (2025). *Money matters: How predictors of adolescent financial literacy have changed over time across countries* [Master's thesis, Purdue University].
 
-**Citation**
+## License
 
-If you use this code, please cite:
-
-Gorgulu, R. (2025). \Money Matters: How Predictors of Adolescent Financial Literacy Have Changed Over Time Across Countries\ \[Master's thesis, Purdue University].
-
-**License**
-MIT License — see `LICENSE` file.
-
+MIT, see `LICENSE`.

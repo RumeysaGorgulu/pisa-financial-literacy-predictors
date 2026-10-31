@@ -1,386 +1,353 @@
-# Installing needed packages
-#install.packages(c("mice", "tidyverse",
-#                   "haven", "naniar", "psych", "car",
-#                   "plotly", "purrr", "survey", "mitools",
-#                   "parameters","performance","see", "lmtest"))
-library(mice)
-library(tidyverse)
-library(haven)
-library(naniar)
-library(psych)
-library(car)
-library(plotly)
-library(purrr)
-library(survey)
-library(mitools)
-library(ggplot2)
-library(parameters)
-library(performance)
-library(see)
-library(lmtest)
-                   
-# 1. Importing PISA 2018 and 2022 Datasets
+# Predictors of adolescent financial literacy: PISA 2018 and 2022
+# United States, Poland, Spain
+#
+# Methods
+#   - Weighted multiple regression of financial literacy on student, family and
+#     school predictors, fitted separately for each country x cycle
+#   - 10 plausible values (PVs) for financial literacy
+#   - Fay's BRR variance estimation with 80 replicate weights (rho = 0.5)
+#   - Multiple imputation of missing predictors with mice (m = 10)
+#   - Imputation k is paired with PV k; the 10 fits are pooled with Rubin's rules
+#
+# Input : data/CY07_MSU_FLT_QQQ.SAV (2018), data/CY08MSP_FLT_QQQ.SAV (2022)
+# Output: output/*.csv, output/results_table.md, plots/*.png
+#
+# Run from the repository root: Rscript R/analysis.R
+# Runtime: about 10–30 minutes (mostly the imputation step).
+
+# 0. Setup --------------------------------------------------------------------
+# install.packages(c("tidyverse", "haven", "mice", "survey", "mitools", "car", "lmtest"))
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(haven)
+  library(mice)
+  library(survey)
+  library(mitools)
+  library(car)
+  library(lmtest)
+})
+
+# Thesis setting: the imputation model contains the predictors only.
+# Set to TRUE for a sensitivity analysis in which imputation k also includes
+# PV k of the outcome (recommended in the MI literature; can change estimates).
+IMPUTE_WITH_OUTCOME <- FALSE
+
+dir.create("output", showWarnings = FALSE)
+dir.create("plots",  showWarnings = FALSE)
+
+# 1. Import -------------------------------------------------------------------
 fl18 <- read_sav("data/CY07_MSU_FLT_QQQ.SAV")
 fl22 <- read_sav("data/CY08MSP_FLT_QQQ.SAV")
 
-# 2. Identify Variables
-id <- c("CNTRYID", "CNT", "CNTSTUID", "CNTSCHID")
-student <- c("ST004D01T", "IMMIG",
-             "FCFMLRTY", "FLCONFIN", "FLCONICT")
-parent <- c("MISCED", "FISCED", "BMMJ1", "BFMJ2",
-            "HOMEPOS", "FLFAMILY")
-school <- c("FLSCHOOL", "ESCS")
-weights <- c("W_FSTUWT", paste0("W_FSTURWT", 1:80))
+# 2. Variables ----------------------------------------------------------------
+id      <- c("CNTRYID", "CNT", "CNTSTUID", "CNTSCHID")
+student <- c("ST004D01T", "IMMIG", "FCFMLRTY", "FLCONFIN", "FLCONICT")
+parent  <- c("MISCED", "FISCED", "BMMJ1", "BFMJ2", "HOMEPOS", "FLFAMILY")
+school  <- c("FLSCHOOL", "ESCS")
+repw    <- paste0("W_FSTURWT", 1:80)
+weights <- c("W_FSTUWT", repw)
 flscore <- paste0("PV", 1:10, "FLIT")
-all.variables <- c(id, student, parent, school, weights, flscore)
+all_vars <- c(id, student, parent, school, weights, flscore)
 
-# 3. Filter Countries and Select/Filter Variables
-countries <- c("POL", "USA", "ESP")
-fl18.1 <- fl18 %>%
-  select(all_of(all.variables)) %>%
-  filter(CNT %in% countries)
-fl22.1 <- fl22 %>%
-  select (all_of(all.variables)) %>%
-  filter(CNT %in% countries)
+countries <- c(USA = "USA", POL = "Poland", ESP = "Spain")
 
-# 4. Recode Missing Values and MISCED/FISCED
-fl18.2 <- fl18.1 %>%
-  mutate(
-    ST004D01T = replace(ST004D01T, ST004D01T %in%
-                          c(9,8,7,5), NA),
-    IMMIG = replace(IMMIG, IMMIG %in%
-                      c(9, 8, 7, 5), NA),
-    FCFMLRTY = replace(FCFMLRTY, FCFMLRTY %in%
-                         c(99,98, 97, 95), NA),
-    FLCONFIN = replace(FLCONFIN, FLCONFIN %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    FLCONICT = replace(FLCONICT, FLCONICT %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    MISCED = replace(MISCED, MISCED %in%
-                       c(99, 98, 98, 95), NA),
-    FISCED = replace(FISCED, FISCED %in%
-                       c(99, 98, 98, 95), NA),
-    BMMJ1 = replace(BMMJ1, BMMJ1 %in%
-                      c(999.00,998.00, 997.00,
-                        995.00), NA),
-    BFMJ2 = replace(BFMJ2, BFMJ2 %in%
-                      c(999.00, 998.00, 997.00,
-                        995.00), NA),
-    HOMEPOS = replace(HOMEPOS, HOMEPOS %in%
-                        c(99.0000, 98.0000, 97.0000,
-                          95.0000), NA),
-    FLFAMILY = replace(FLFAMILY, FLFAMILY %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    FLSCHOOL = replace(FLSCHOOL, FLSCHOOL %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    ESCS = replace(ESCS, ESCS %in%
-                     c(99.0000, 98.0000, 97.0000,
-                       95.0000), NA)
-  )
-fl22.2 <- fl22.1 %>%
-  mutate(
-    ST004D01T = replace(ST004D01T, ST004D01T %in%
-                          c(9,8,7,5), NA),
-    IMMIG = replace(IMMIG, IMMIG %in%
-                      c(9, 8, 7, 5), NA),
-    FCFMLRTY = replace(FCFMLRTY, FCFMLRTY %in%
-                         c(99,98, 97, 95), NA),
-    FLCONFIN = replace(FLCONFIN, FLCONFIN %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    FLCONICT = replace(FLCONICT, FLCONICT %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    MISCED = replace(MISCED, MISCED %in%
-                       c(99, 98, 98, 95), NA),
-    FISCED = replace(FISCED, FISCED %in%
-                       c(99, 98, 98, 95), NA),
-    BMMJ1 = replace(BMMJ1, BMMJ1 %in%
-                      c(999.00,998.00, 997.00,
-                        995.00), NA),
-    BFMJ2 = replace(BFMJ2, BFMJ2 %in%
-                      c(999.00, 998.00, 997.00,
-                        995.00), NA),
-    HOMEPOS = replace(HOMEPOS, HOMEPOS %in%
-                        c(99.0000, 98.0000, 97.0000,
-                          95.0000), NA),
-    FLFAMILY = replace(FLFAMILY, FLFAMILY %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    FLSCHOOL = replace(FLSCHOOL, FLSCHOOL %in%
-                         c(99.0000, 98.0000, 97.0000,
-                           95.0000), NA),
-    ESCS = replace(ESCS, ESCS %in%
-                     c(99.0000, 98.0000, 97.0000,
-                       95.0000), NA)
-  )
-fl22.2 <- fl22.2 %>%
-  mutate(
-    MISCED = case_when(
-      MISCED == 1 ~ 0,
-      MISCED == 2 ~ 1,
-      MISCED == 3 ~ 2,
-      MISCED == 4 ~ 3,
-      MISCED == 5 ~ 4,
-      MISCED == 6 ~ 4,
-      MISCED == 7 ~ 5,
-      MISCED %in% c(8,9,10) ~ 6,
-      TRUE ~ MISCED
-    ),
-    FISCED = case_when(
-      FISCED == 1 ~ 0,
-      FISCED == 2 ~ 1,
-      FISCED == 3 ~ 2,
-      FISCED == 4 ~ 3,
-      FISCED == 5 ~ 4,
-      FISCED == 6 ~ 4,
-      FISCED == 7 ~ 5,
-      FISCED %in% c(8,9,10) ~ 6,
-      TRUE ~ FISCED
-    )
-  )
+predictors  <- c("ST004D01T", "IMMIG", "FCFMLRTY", "MISCED", "FISCED",
+                 "FLCONFIN", "FLCONICT", "HOMEPOS", "FLFAMILY",
+                 "FLSCHOOL", "BMMJ1", "BFMJ2", "SCHESCS")
+categorical <- c("ST004D01T", "IMMIG")
+continuous  <- setdiff(predictors, categorical)
 
-# 5. Convert labelled variables
-convert <- function(df, id) {
-  categorical <- c("ST004D01T", "IMMIG")
-  df %>%
-    dplyr::mutate(
-      dplyr::across(-dplyr::all_of(id), ~{
-        if (!haven::is.labelled(.)) {
-          .
-        } else {
-          nm <- dplyr::cur_column()
-          if (nm %in% categorical) {
-            haven::as_factor(., levels = "labels")
-          } else {
-            as.numeric(haven::zap_labels(.))
-          }
-        }
-      })
-    )
-}
-fl18.3 <- convert(fl18.2, id)
-fl22.3 <- convert(fl22.2, id)
-
-# 6. Adding Mean of Schools ESCS
-fl18.3 <- convert(fl18.2, id) %>%
-  group_by(CNTSCHID) %>%
-  mutate(SCHESCS = weighted.mean(ESCS, W_FSTUWT, na.rm = TRUE)) %>%
-  ungroup() %>%
-  select(-ESCS)
-fl22.3 <- convert(fl22.2, id) %>%
-  group_by(CNTSCHID) %>%
-  mutate(SCHESCS = weighted.mean(ESCS, W_FSTUWT, na.rm = TRUE)) %>%
-  ungroup() %>%
-  select(-ESCS)
-
-# 7. Check Missingness
-all.variables[all.variables == "ESCS"] <- "SCHESCS"
-withoutcnt <- setdiff(all.variables, "CNT")
-cnt.missing18 <- fl18.3 %>%
-  group_by(CNT) %>%
-  summarise(across(all_of(withoutcnt), ~ mean(is.na(.)) * 100, .names = "miss_{.col}")) %>%
-  pivot_longer(-CNT, names_to = "variable", values_to = "miss_2018")
-View(cnt.missing18)
-cnt.missing22 <- fl22.3 %>%
-  group_by(CNT) %>%
-  summarise(across(all_of(withoutcnt), ~ mean(is.na(.)) * 100, .names = "miss_{.col}")) %>%
-  pivot_longer(-CNT, names_to = "variable", values_to = "miss_2022")
-View(cnt.missing22)
-
-# 8. Select Countries for Final Analysis
-usa18 <- fl18.3 %>% filter(CNT == "USA")
-usa22 <- fl22.3 %>% filter(CNT == "USA")
-poland18 <- fl18.3 %>% filter(CNT == "POL")
-poland22 <- fl22.3 %>% filter(CNT == "POL")
-spain18 <- fl18.3 %>% filter(CNT == "ESP")
-spain22 <- fl22.3 %>% filter(CNT == "ESP")
-
-# 9. Descriptive Statistics and Frequency
-categorical <- c("ST004D01T","IMMIG")
-continuous <- c("MISCED","FISCED","FCFMLRTY","FLCONFIN","FLCONICT",
-                "HOMEPOS","FLFAMILY","FLSCHOOL","BMMJ1","BFMJ2","SCHESCS")
-datasets <- list(
-  usa18 = usa18, usa22 = usa22,
-  poland18 = poland18, poland22 = poland22,
-  spain18 = spain18, spain22 = spain22
+predictor_labels <- c(
+  ST004D01T = "Gender", IMMIG = "Immigrant background",
+  FCFMLRTY = "Familiarity with financial concepts",
+  FLCONFIN = "Confidence about financial matters",
+  FLCONICT = "Confidence with digital financial tools",
+  MISCED = "Mother's education", FISCED = "Father's education",
+  BMMJ1 = "Mother's occupational status", BFMJ2 = "Father's occupational status",
+  HOMEPOS = "Home possessions", FLFAMILY = "Parental involvement in financial matters",
+  FLSCHOOL = "Financial education at school", SCHESCS = "School mean ESCS"
 )
-designs <- purrr::imap(datasets, ~ svydesign(ids = ~1, weights = ~W_FSTUWT, data = .x))
-continuous.summary_w <- purrr::imap_dfr(designs, function(des, name) {
-  m <- svymean(as.formula(paste("~", paste(continuous, collapse = "+"))),
-               design = des, na.rm = TRUE)
-  v <- svyvar(as.formula(paste("~", paste(continuous, collapse = "+"))),
-              design = des, na.rm = TRUE)
-  sd_vec <- sqrt(diag(as.matrix(v)))
-  tibble::tibble(
-    dataset = name,
-    variable = names(coef(m)),
-    mean_w = as.numeric(coef(m)),
-    sd_w = as.numeric(sd_vec)
-  )
-})
-View(continuous.summary_w)
-categorical.freq_w <- purrr::imap_dfr(designs, function(des, name) {
-  purrr::map_dfr(intersect(categorical, names(des$variables)), function(v) {
-    tab <- svytable(as.formula(paste0("~", v)), design = des)
-    pct <- 100 * prop.table(tab)
-    tibble::tibble(
-      dataset = name,
-      variable = v,
-      level = names(tab),
-      count_w = as.numeric(tab),
-      percent_w = as.numeric(pct)
+
+# 3. Recode missing-value codes -----------------------------------------------
+# read_sav() already converts SPSS user-defined missing values to NA; this step
+# catches any remaining PISA missing codes that were not declared as missing.
+to_na <- function(x, codes) replace(x, x %in% codes, NA)
+
+codes_cat   <- c(5, 7, 8, 9)            # single-digit categorical variables
+codes_index <- c(95, 97, 98, 99)        # derived indices and 2022 ISCED
+codes_isei  <- c(995, 997, 998, 999)    # occupational status (ISEI)
+
+recode_missing <- function(df, cycle) {
+  isced_codes <- if (cycle == 2018) c(7, 8, 9) else codes_index  # 2018 ISCED 0–6
+  df %>%
+    mutate(
+      across(c(ST004D01T, IMMIG), ~ to_na(., codes_cat)),
+      across(c(FCFMLRTY, FLCONFIN, FLCONICT, HOMEPOS, FLFAMILY, FLSCHOOL, ESCS),
+             ~ to_na(., codes_index)),
+      across(c(MISCED, FISCED), ~ to_na(., isced_codes)),
+      across(c(BMMJ1, BFMJ2), ~ to_na(., codes_isei))
     )
-  })
-})
-View(categorical.freq_w)
-weighted_pv_summary <- function(data, pvlabel = "FLIT") {
-  pv_cols <- paste0("PV", 1:10, pvlabel)
-  weights <- data$W_FSTUWT
-  means <- sapply(pv_cols, function(pv) {
-    weighted.mean(data[[pv]], weights, na.rm = TRUE)
-  })
-  vars <- sapply(pv_cols, function(pv) {
-    # Formula: sum(w * (x - mean_w)^2) / sum(w)
-    m <- weighted.mean(data[[pv]], weights, na.rm = TRUE)
-    sum(weights * (data[[pv]] - m)^2, na.rm = TRUE) / sum(weights, na.rm = TRUE)
-  })
-  data.frame(
-    mean_w = mean(means),
-    sd_w = sqrt(mean(vars))
+}
+
+# 2022 ISCED (1–10) mapped onto the 2018 scale (0–6) for comparability
+harmonize_isced_2022 <- function(x) {
+  case_when(
+    x == 1 ~ 0, x == 2 ~ 1, x == 3 ~ 2, x == 4 ~ 3,
+    x %in% c(5, 6) ~ 4, x == 7 ~ 5, x %in% c(8, 9, 10) ~ 6,
+    TRUE ~ as.numeric(x)
   )
 }
-pv.summary_w <- purrr::imap_dfr(datasets, function(df, name) {
-  weighted_pv_summary(df, "FLIT") %>% dplyr::mutate(dataset = name, .before = 1)
-})
-View(pv.summary_w)
 
-# 10. Model Assumptions and Diagnostics
-df.1 <- poland22
-mod.1 <- lm(PV1FLIT ~ ST004D01T + IMMIG + FCFMLRTY + MISCED + FISCED +
-              FLCONFIN + FLCONICT + HOMEPOS +
-              FLFAMILY + FLSCHOOL + BMMJ1 + BFMJ2 + SCHESCS,
-            data = df.1)
-check_model(mod.1, panel = TRUE)
-crPlots(mod.1)
-vif(mod.1)
-qqnorm(residuals(mod.1)); qqline(residuals(mod.1))
-bptest(mod.1)
-
-# 11. Imputation for Missing Variables (per country)
-iv <- c("ST004D01T", "IMMIG", "FCFMLRTY", "FLCONFIN",
-        "FLCONICT", "MISCED", "FISCED", "BMMJ1",
-        "BFMJ2", "HOMEPOS", "FLFAMILY", "FLSCHOOL", "SCHESCS")
-set.seed(2025)
-imputation.1 <- function(df, name) {
-  iv.data <- df %>% select(all_of(iv))
-  fac <- sapply(iv.data, is.factor)
-  nlev <- if (any(fac)) sapply(iv.data[fac], nlevels) else integer(0)
-  meth <- make.method(iv.data); meth[] <- "pmm"
-  if (length(nlev)) {
-    meth[names(nlev)[nlev == 2]] <- "logreg"
-    meth[names(nlev)[nlev > 2]] <- "polyreg"
-  }
-  imp <- mice(iv.data, m = 10, method = meth, seed = 2025)
-  base <- df %>% select(CNTSTUID, CNT, CNTRYID, all_of(flscore), all_of(weights))
-  for (i in 1:10) {
-    assign(paste0(name, "_final", i),
-           bind_cols(base, complete(imp, i)),
-           envir = .GlobalEnv)
-  }
-  paste0(name, "_final", 1:10)
+# Labelled categorical variables become factors; everything else numeric
+convert <- function(df) {
+  df %>%
+    mutate(across(-all_of(id), ~ {
+      if (!is.labelled(.)) .
+      else if (cur_column() %in% categorical) as_factor(., levels = "labels")
+      else as.numeric(zap_labels(.))
+    })) %>%
+    mutate(across(all_of(categorical), droplevels))
 }
-imputation.1(usa18, "usa18")
-imputation.1(usa22, "usa22")
-imputation.1(poland18, "poland18")
-imputation.1(poland22, "poland22")
-imputation.1(spain18, "spain18")
-imputation.1(spain22, "spain22")
 
-# 12. Final Datasets for Modeling
-usa18.list <- mget(paste0("usa18_final", 1:10))
-usa22.list <- mget(paste0("usa22_final", 1:10))
-poland18.list <- mget(paste0("poland18_final", 1:10))
-poland22.list <- mget(paste0("poland22_final", 1:10))
-spain18.list <- mget(paste0("spain18_final", 1:10))
-spain22.list <- mget(paste0("spain22_final", 1:10))
+prepare <- function(df, cycle) {
+  out <- df %>%
+    select(all_of(all_vars)) %>%
+    filter(CNT %in% names(countries)) %>%
+    recode_missing(cycle)
 
-# 13. Survey Design
-repw <- paste0("W_FSTURWT", 1:80)
-predictors <- c("ST004D01T", "IMMIG", "FCFMLRTY", "MISCED", "FISCED",
-                "FLCONFIN", "FLCONICT", "HOMEPOS", "FLFAMILY",
-                "FLSCHOOL", "BMMJ1", "BFMJ2", "SCHESCS")
-analysis <- function(list.of.dfs, predictors) {
-  fits <- lapply(seq_along(list.of.dfs), function(k) {
-    dfk <- list.of.dfs[[k]]
-    pv <- paste0("PV", k, "FLIT")
-    rw <- as.matrix(dfk[, repw]); storage.mode(rw) <- "double"
-    des <- svrepdesign(weights=~W_FSTUWT, repweights=rw,
-                       type="Fay", rho=0.5, combined.weights=TRUE, data=dfk)
-    fml <- as.formula(paste(pv, "~", paste(predictors, collapse=" + ")))
-    svyglm(fml, design=des)
+  if (cycle == 2022) {
+    out <- out %>% mutate(across(c(MISCED, FISCED), harmonize_isced_2022))
+  }
+
+  out %>%
+    convert() %>%
+    mutate(CNT = as.character(CNT)) %>%
+    # School socioeconomic composition: weighted school mean of student ESCS
+    group_by(CNTSCHID) %>%
+    mutate(SCHESCS = weighted.mean(ESCS, W_FSTUWT, na.rm = TRUE),
+           SCHESCS = if_else(is.nan(SCHESCS), NA_real_, SCHESCS)) %>%
+    ungroup() %>%
+    select(-ESCS)
+}
+
+fl <- list("2018" = prepare(fl18, 2018), "2022" = prepare(fl22, 2022))
+rm(fl18, fl22); invisible(gc())
+
+# One data set per country x cycle
+datasets <- list()
+for (cycle in names(fl)) {
+  for (cnt in names(countries)) {
+    datasets[[paste(cnt, cycle, sep = "_")]] <- fl[[cycle]] %>% filter(CNT == cnt)
+  }
+}
+
+# 4. Missingness ----------------------------------------------------------------
+missingness <- imap_dfr(datasets, function(df, key) {
+  tibble(dataset = key, variable = predictors,
+         missing_pct = map_dbl(predictors, ~ round(mean(is.na(df[[.x]])) * 100, 2)))
+}) %>%
+  pivot_wider(names_from = dataset, values_from = missing_pct)
+write_csv(missingness, "output/missingness.csv")
+
+sample_sizes <- imap_dfr(datasets, ~ tibble(dataset = .y, n = nrow(.x)))
+write_csv(sample_sizes, "output/sample_sizes.csv")
+print(sample_sizes)
+
+# 5. Weighted descriptive statistics ----------------------------------------------
+designs <- map(datasets, ~ svydesign(ids = ~1, weights = ~W_FSTUWT, data = .x))
+
+descriptives_continuous <- imap_dfr(designs, function(des, key) {
+  map_dfr(continuous, function(v) {
+    f <- as.formula(paste0("~", v))
+    m <- svymean(f, des, na.rm = TRUE)
+    s <- svyvar(f, des, na.rm = TRUE)
+    tibble(dataset = key, variable = v,
+           mean_w = as.numeric(coef(m)), sd_w = sqrt(as.numeric(coef(s))))
+  })
+})
+write_csv(descriptives_continuous, "output/descriptives_continuous.csv")
+
+descriptives_categorical <- imap_dfr(designs, function(des, key) {
+  map_dfr(categorical, function(v) {
+    tab <- svytable(as.formula(paste0("~", v)), design = des)
+    tibble(dataset = key, variable = v, level = names(tab),
+           count_w = as.numeric(tab), percent_w = as.numeric(100 * prop.table(tab)))
+  })
+})
+write_csv(descriptives_categorical, "output/descriptives_categorical.csv")
+
+# Financial literacy: weighted mean and SD, averaged over the 10 PVs
+fl_summary <- imap_dfr(datasets, function(df, key) {
+  w <- df$W_FSTUWT
+  stats <- map_dfr(flscore, function(pv) {
+    m <- weighted.mean(df[[pv]], w, na.rm = TRUE)
+    v <- sum(w * (df[[pv]] - m)^2, na.rm = TRUE) / sum(w, na.rm = TRUE)
+    tibble(mean = m, var = v)
+  })
+  tibble(dataset = key, fl_mean_w = mean(stats$mean), fl_sd_w = sqrt(mean(stats$var)))
+})
+write_csv(fl_summary, "output/financial_literacy_summary.csv")
+
+# 6. Regression diagnostics (PV1, complete cases) ---------------------------------
+diag_formula <- reformulate(predictors, "PV1FLIT")
+
+diagnostics <- imap_dfr(datasets, function(df, key) {
+  mod <- lm(diag_formula, data = df, weights = W_FSTUWT)
+  png(paste0("plots/diagnostics_", key, ".png"), width = 1400, height = 1400, res = 150)
+  par(mfrow = c(2, 2)); plot(mod); dev.off()
+  v <- vif(mod)
+  v <- if (is.matrix(v)) v[, "GVIF^(1/(2*Df))"]^2 else v
+  bp <- bptest(mod)
+  tibble(dataset = key, max_vif = round(max(v), 2),
+         max_vif_variable = names(v)[which.max(v)],
+         breusch_pagan_p = signif(bp$p.value, 3))
+})
+write_csv(diagnostics, "output/diagnostics.csv")
+
+# 7. Multiple imputation -------------------------------------------------------------
+# Returns 10 completed data sets per country x cycle. Data set k is analysed
+# with PV k in step 8.
+
+impute <- function(df, key) {
+  message("Imputing ", key)
+  iv_data <- df %>% select(all_of(predictors))
+  method_for <- function(dat) {
+    meth <- make.method(dat); meth[] <- "pmm"
+    for (v in names(dat)[sapply(dat, is.factor)]) {
+      meth[v] <- if (nlevels(dat[[v]]) == 2) "logreg" else "polyreg"
+    }
+    meth
+  }
+  base <- df %>% select(CNTSTUID, CNT, CNTRYID, all_of(flscore), all_of(weights))
+
+  if (!IMPUTE_WITH_OUTCOME) {
+    imp <- mice(iv_data, m = 10, method = method_for(iv_data),
+                seed = 2025, printFlag = FALSE)
+    map(1:10, ~ bind_cols(base, complete(imp, .x)))
+  } else {
+    map(1:10, function(k) {
+      pv  <- paste0("PV", k, "FLIT")
+      dat <- bind_cols(iv_data, df[pv])
+      meth <- method_for(dat); meth[pv] <- ""
+      imp <- mice(dat, m = 1, method = meth, seed = 2025 + k, printFlag = FALSE)
+      bind_cols(base, complete(imp, 1) %>% select(all_of(predictors)))
+    })
+  }
+}
+
+imputed <- imap(datasets, impute)
+
+# 8. Survey-weighted regression, pooled with Rubin's rules --------------------------
+weighted_r2 <- function(fit, y, w) {
+  e <- y - fitted(fit)
+  1 - sum(w * e^2) / sum(w * (y - weighted.mean(y, w))^2)
+}
+
+analyse <- function(dfs) {
+  fits <- map(seq_along(dfs), function(k) {
+    dfk <- dfs[[k]]
+    rw  <- as.matrix(dfk[, repw]); storage.mode(rw) <- "double"
+    des <- svrepdesign(weights = ~W_FSTUWT, repweights = rw, type = "Fay",
+                       rho = 0.5, combined.weights = TRUE, data = dfk)
+    svyglm(reformulate(predictors, paste0("PV", k, "FLIT")), design = des)
   })
   pooled <- MIcombine(fits)
   est <- coef(pooled)
-  se <- sqrt(diag(pooled$variance))
-  t <- est/se
-  p <- 2*pnorm(-abs(t))
-  fmtp <- function(x) ifelse(x<.001,"<0.001",sprintf("%.3f",x))
-  coef_table <- data.frame(term=names(est),
-                           estimate=round(est,3),
-                           std.error=round(se,3),
-                           t=round(t,2),
-                           p.value=fmtp(p),
-                           row.names=NULL)
-  r2_vals <- sapply(fits, function(m) {
-    performance::r2(m, verbose = FALSE)$R2
+  se  <- sqrt(diag(pooled$variance))
+  z   <- est / se
+  r2  <- map2_dbl(fits, seq_along(dfs), function(f, k) {
+    weighted_r2(f, dfs[[k]][[paste0("PV", k, "FLIT")]], dfs[[k]]$W_FSTUWT)
   })
-  r2_summary <- data.frame(
-    r2_mean = mean(r2_vals, na.rm = TRUE),
-    r2_min = min(r2_vals, na.rm = TRUE),
-    r2_max = max(r2_vals, na.rm = TRUE)
-  )
   list(
-    coef_table = coef_table,
-    r2_summary = r2_summary,
-    r2_by_pv = r2_vals
+    coefs = tibble(term = names(est), estimate = est, std.error = se,
+                   conf.low = est - 1.96 * se, conf.high = est + 1.96 * se,
+                   z = z, p.value = 2 * pnorm(-abs(z))),
+    r2 = tibble(r2_mean = mean(r2), r2_min = min(r2), r2_max = max(r2))
   )
 }
 
-# 14. Running Analysis
-usa18.res <- analysis(usa18.list, predictors)
-usa22.res <- analysis(usa22.list, predictors)
-pol18.res <- analysis(poland18.list, predictors)
-pol22.res <- analysis(poland22.list, predictors)
-sp18.res <- analysis(spain18.list, predictors)
-sp22.res <- analysis(spain22.list, predictors)
+results <- imap(imputed, function(dfs, key) { message("Modelling ", key); analyse(dfs) })
 
-# 15. Results
-tag.coef <- function(x, country, year) {
-  dplyr::mutate(x$coef_table, country = country, year = year)
+split_key <- function(key) {
+  parts <- str_split_1(key, "_")
+  list(country = countries[[parts[1]]], year = parts[2])
 }
-all.coefs <- bind_rows(
-  tag.coef(usa18.res, "USA", "2018"),
-  tag.coef(usa22.res, "USA", "2022"),
-  tag.coef(pol18.res, "Poland", "2018"),
-  tag.coef(pol22.res, "Poland", "2022"),
-  tag.coef(sp18.res, "Spain", "2018"),
-  tag.coef(sp22.res, "Spain", "2022")
-  )
-View(all.coefs)
-tag.r2 <- function(x, country, year) {
-  mutate(x$r2_summary, country = country, year = year)
+
+coefficients <- imap_dfr(results, function(r, key) {
+  k <- split_key(key)
+  r$coefs %>% mutate(country = k$country, year = k$year, .before = 1)
+})
+write_csv(coefficients %>% mutate(across(where(is.double), ~ signif(., 4))),
+          "output/coefficients.csv")
+
+r2_table <- imap_dfr(results, function(r, key) {
+  k <- split_key(key)
+  r$r2 %>% mutate(country = k$country, year = k$year, .before = 1)
+})
+write_csv(r2_table %>% mutate(across(where(is.double), ~ round(., 3))), "output/r2.csv")
+print(r2_table)
+
+# 9. Coefficient plot ----------------------------------------------------------------
+# Continuous predictors are shown per 1 SD (weighted SD within country x cycle),
+# so effects are comparable across predictors; units stay in PISA score points.
+
+sd_lookup <- descriptives_continuous %>%
+  mutate(country = countries[str_sub(dataset, 1, 3)], year = str_sub(dataset, 5, 8)) %>%
+  select(country, year, term = variable, sd_w)
+
+plot_df <- coefficients %>%
+  filter(term %in% continuous) %>%
+  left_join(sd_lookup, by = c("country", "year", "term")) %>%
+  mutate(across(c(estimate, conf.low, conf.high), ~ . * sd_w),
+         term = factor(predictor_labels[term],
+                       levels = rev(predictor_labels[continuous])))
+
+p_coef <- ggplot(plot_df, aes(estimate, term, color = year)) +
+  geom_vline(xintercept = 0, color = "grey60") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high),
+                  position = position_dodge(width = 0.6), size = 0.25) +
+  facet_wrap(~ country) +
+  scale_color_manual(values = c("2018" = "grey50", "2022" = "steelblue")) +
+  labs(title = "Predictors of financial literacy, PISA 2018 vs 2022",
+       subtitle = "Change in score points per 1 SD of each predictor, 95% CI (BRR + Rubin's rules)",
+       x = "Score points per 1 SD", y = NULL, color = "Cycle") +
+  theme_minimal(base_size = 10) +
+  theme(legend.position = "bottom")
+ggsave("plots/coefficients_by_country.png", p_coef, width = 11, height = 6, dpi = 150)
+
+# 10. Markdown tables for the README -------------------------------------------------
+md_table <- function(df) {
+  c(paste0("| ", paste(names(df), collapse = " | "), " |"),
+    paste0("|", paste(rep("---", ncol(df)), collapse = "|"), "|"),
+    apply(df, 1, function(r) paste0("| ", paste(r, collapse = " | "), " |")))
 }
-all.r2 <- bind_rows(
-  tag.r2(usa18.res, "USA", "2018"),
-  tag.r2(usa22.res, "USA", "2022"),
-  tag.r2(pol18.res, "Poland", "2018"),
-  tag.r2(pol22.res, "Poland", "2022"),
-  tag.r2(sp18.res, "Spain", "2018"),
-  tag.r2(sp22.res, "Spain", "2022")
-  )
-View(all.r2)
+
+r2_md <- r2_table %>%
+  transmute(Country = country, Cycle = year,
+            `R² (mean over PVs)` = sprintf("%.3f", r2_mean),
+            `Range` = sprintf("%.3f–%.3f", r2_min, r2_max))
+
+stars <- function(p) case_when(p < .001 ~ "***", p < .01 ~ "**", p < .05 ~ "*", TRUE ~ "")
+coef_md <- coefficients %>%
+  filter(term != "(Intercept)") %>%
+  mutate(cell = sprintf("%.2f%s", estimate, stars(p.value)),
+         col = paste(country, year)) %>%
+  select(term, col, cell) %>%
+  pivot_wider(names_from = col, values_from = cell) %>%
+  mutate(term = case_when(
+    term %in% names(predictor_labels) ~ predictor_labels[term],
+    str_starts(term, "ST004D01T") ~ paste("Gender:", str_remove(term, "^ST004D01T")),
+    str_starts(term, "IMMIG") ~ paste("Immigrant background:", str_remove(term, "^IMMIG")),
+    TRUE ~ term
+  )) %>%
+  rename(Predictor = term)
+
+writeLines(c("### Variance explained", "", md_table(r2_md), "",
+             "### Unstandardized coefficients (score points)", "",
+             md_table(coef_md), "",
+             "\\* p < .05, \\*\\* p < .01, \\*\\*\\* p < .001"),
+           "output/results_table.md")
+
+writeLines(capture.output(sessionInfo()), "output/sessionInfo.txt")
+message("Done. Results are in output/ and plots/.")
